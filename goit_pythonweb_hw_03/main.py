@@ -6,16 +6,23 @@ do_GET and do_POST methods to process corresponding requests.
 
 """
 
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import json
+import logging
 import mimetypes
+import os
 import pathlib
 import urllib.parse
-import logging
+from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from jinja2 import Environment, FileSystemLoader
 
 # налаштування логування
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG
 )
+
+# Шлях до файлу
+data_path = "storage/data.json"
 
 
 class HttpHandler(BaseHTTPRequestHandler):
@@ -37,26 +44,73 @@ class HttpHandler(BaseHTTPRequestHandler):
             self.send_html_file("./index.html")
         elif pr_url.path == "/message.html":
             self.send_html_file("./message.html")
+        elif pr_url.path == "/read.html":
+            self.generate_jinja_read()
+            self.send_html_file("./read.html")
         else:
             if pathlib.Path().joinpath(pr_url.path[1:]).exists():
                 self.send_static()
             else:
                 self.send_html_file("error.html", 404)
 
-    def do_POST(self):
-        """Respond to a POST request.
+    def generate_jinja_read(self, template_path="read_jinja_tpl.html"):
+        """
+        Generate HTML page using Jinja2 template.
+        """
+        env = Environment(loader=FileSystemLoader("."))
+        read_template = env.get_template(template_path)
+        messages = self.read_messages(data_path)
+        logging.debug(json.dumps(messages, indent=4))
+        output = read_template.render(messages=messages)
+        with open("read.html", "w", encoding="utf-8") as file:
+            file.write(output)
+        return "read.html"
 
-        The response is a redirect to the / page.
-        The content of the request is saved in a file "data.json".
+    def read_messages(self, data_path):
+        """
+        Read messages from a JSON file and return them as a list of dictionaries.
+        """
+        with open(data_path, "r", encoding="utf-8") as file:
+            try:
+                messages = json.load(file)
+            except json.JSONDecodeError:
+                messages = {}
+        return messages
+
+    def do_POST(self):
+        """
+        Handle POST request.
+
+        Saves the request content to "data.json" and redirects to the home page.
         """
         data = self.rfile.read(int(self.headers["Content-Length"]))
         logging.debug(data)
         data_parse = urllib.parse.unquote_plus(data.decode())
         logging.debug(data_parse)
+        time_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         data_dict = {
-            key: value for key, value in [el.split("=") for el in data_parse.split("&")]
+            time_stamp: {
+                key: value
+                for key, value in [el.split("=") for el in data_parse.split("&")]
+            }
         }
         logging.debug(data_dict)
+
+        # Створення директорії, якщо вона не існує
+        os.makedirs(os.path.dirname(data_path), exist_ok=True)
+
+        # Запис даних у файл
+        if os.path.exists(data_path):
+            with open(data_path, "r+", encoding="utf-8") as file:
+                messages = self.read_messages(data_path)
+                messages.update(data_dict)  # Оновлення даних
+                file.seek(0)
+                json.dump(messages, file, indent=4)
+                file.truncate()
+        else:
+            with open(data_path, "w", encoding="utf-8") as file:
+                json.dump(data_dict, file, indent=4)
+
         self.send_response(302)
         self.send_header("Location", "/")
         self.end_headers()
@@ -118,7 +172,7 @@ def run(server_class=HTTPServer, handler_class=HttpHandler):
         KeyboardInterrupt: If the server is interrupted by the user.
     """
 
-    server_address = ("", 8000)
+    server_address = ("", 3000)
     http = server_class(server_address, handler_class)
     try:
         http.serve_forever()

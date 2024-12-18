@@ -1,0 +1,10 @@
+version: '3'
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./goit_pythonweb_hw_03/storage:/app/storage # Монтуємо локальну директорію storage в контейнер
+    environment:
+      - PYTHONUNBUFFERED=1  # Для забезпечення коректного виведення логів
